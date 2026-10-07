@@ -62,6 +62,7 @@ set(dream_equations
     "${PROJECT_SOURCE_DIR}/src/Equations/Fluid/FreeElectronDensityTransientTerm.cpp"
     "${PROJECT_SOURCE_DIR}/src/Equations/Fluid/FreeElectronDensityTerm.cpp"
     "${PROJECT_SOURCE_DIR}/src/Equations/Fluid/HeatTransportDiffusion.cpp"
+    "${PROJECT_SOURCE_DIR}/src/Equations/Fluid/HeatTransportDiffusionTDependent.cpp"
     "${PROJECT_SOURCE_DIR}/src/Equations/Fluid/HeatTransportRechesterRosenbluth.cpp"
     "${PROJECT_SOURCE_DIR}/src/Equations/Fluid/HeatTransportRRAdaptiveMHDLike.cpp"
     "${PROJECT_SOURCE_DIR}/src/Equations/Fluid/HotTailCurrentDensityFromDistributionFunction.cpp"
@@ -215,6 +216,18 @@ set(dream_solvers
 
 
 add_library(dream STATIC ${dream_core} ${dream_settings} ${dream_solvers} ${dream_equations} ${dream_equation_headers} ${dream_headers})
+if(DREAM_USE_ONNX_RUNTIME)
+    find_path(ONNX_RUNTIME_INCLUDE_DIR onnxruntime_cxx_api.h HINTS "${ONNX_RUNTIME_ROOT}/include")
+    find_library(ONNX_RUNTIME_LIBRARY onnxruntime HINTS "${ONNX_RUNTIME_ROOT}/lib")
+    if(NOT ONNX_RUNTIME_INCLUDE_DIR OR NOT ONNX_RUNTIME_LIBRARY)
+        message(FATAL_ERROR "DREAM_USE_ONNX_RUNTIME requires ONNX_RUNTIME_ROOT with headers and native library")
+    endif()
+    target_sources(dream PRIVATE "${PROJECT_SOURCE_DIR}/src/Equations/Fluid/HeatTransportDiffusionNN.cpp")
+    target_include_directories(dream PRIVATE "${ONNX_RUNTIME_INCLUDE_DIR}")
+    target_link_libraries(dream PUBLIC "${ONNX_RUNTIME_LIBRARY}")
+    target_compile_features(dream PUBLIC cxx_std_17)
+    target_compile_definitions(dream PUBLIC DREAM_HAS_ONNX_RUNTIME DREAM_NN_MODEL_ROOT="${PROJECT_SOURCE_DIR}/models/transport")
+endif()
 target_include_directories(dream PUBLIC "${PROJECT_BINARY_DIR}/include" "${PROJECT_SOURCE_DIR}/include")
 target_link_libraries(dream PUBLIC fvm)
 

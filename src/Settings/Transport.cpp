@@ -3,6 +3,10 @@
  */
 
 #include "DREAM/Equations/Fluid/HeatTransportDiffusion.hpp"
+#include "DREAM/Equations/Fluid/HeatTransportDiffusionTDependent.hpp"
+#ifdef DREAM_HAS_ONNX_RUNTIME
+#include "DREAM/Equations/Fluid/HeatTransportDiffusionNN.hpp"
+#endif
 #include "DREAM/Equations/Fluid/HeatTransportRechesterRosenbluth.hpp"
 #include "DREAM/Equations/Fluid/HeatTransportRRAdaptiveMHDLike.hpp"
 #include "DREAM/Equations/Fluid/RunawayTransportRechesterRosenbluth.hpp"
@@ -47,8 +51,23 @@ void SimulationGenerator::DefineOptions_Transport(
         DefineDataTR2P(mod + "/" + subname, s, "drr");
     else
         DefineDataRT(mod + "/" + subname, s, "drr");
+    s->DefineSetting(
+        mod + "/" + subname + "/drr_T_ref",
+        "Reference temperature for prescribed heat diffusion scaled by sqrt(T_cold/T_ref) [eV].",
+        (real_t)1000.0
+    );
 
     DefineDataTR2P(mod + "/" + subname, s, "s_ar");
+    const std::string nn = mod + "/" + subname + "/nn/";
+    s->DefineSetting(nn+"model", "NN ONNX graph; empty selects DREAM default model.", std::string(""));
+    s->DefineSetting(nn+"main_ion", "NN main hydrogen-isotope ion.", std::string("D"));
+    s->DefineSetting(nn+"window_size", "NN history samples.", (int_t)12);
+    s->DefineSetting(nn+"n_rho", "NN radial points.", (int_t)128);
+    s->DefineSetting(nn+"time_step", "NN sampling interval [s].", (real_t)5e-6);
+    s->DefineSetting(nn+"T_ref", "NN reference temperature [eV].", (real_t)1000);
+    s->DefineSetting(nn+"psi_scale", "Native-to-model fixed flux scale.", (real_t)1);
+    s->DefineSetting(nn+"psi_offset", "Native-to-model fixed flux offset.", (real_t)0);
+    s->DefineSetting(nn+"normalization_minor_radius", "NN normalization minor radius [m]; zero uses grid radius.", (real_t)0);
     DefineDataTR2P(mod + "/" + subname, s, "s_drr");
     s->DefineSetting(mod + "/" + subname + "/pstar",
         "The lower momentum bound for the (source-free) runaway radial-transport region.",
@@ -337,7 +356,7 @@ bool SimulationGenerator::ConstructTransportTerm(
     }
     
     // Has diffusion?
-    if (hasCoeff("drr", (kinetic?4:2))){
+    if (hasCoeff("drr", (kinetic?4:2)) && type != OptionConstants::EQTERM_TRANSPORT_PRESCRIBED_T_DEPENDENT){
         hasNonTrivialTransport = true;
         FVM::DiffusionTerm *dt;
         if (not heat) {
@@ -368,6 +387,60 @@ bool SimulationGenerator::ConstructTransportTerm(
             );
 
         // Store B.C. for OtherQuantityHandler
+        if (diffusive_bc != nullptr)
+            *diffusive_bc = dbc;
+    }
+
+    if (type == OptionConstants::EQTERM_TRANSPORT_NEURAL_NETWORK) {
+        if (!heat || kinetic || hasCoeff("drr", 2) || hasCoeff("ar", 2) || hasCoeff("dBB", 2))
+            throw SettingsException("NN transport is heat-only and cannot be combined with prescribed transport.");
+#ifdef DREAM_HAS_ONNX_RUNTIME
+        auto *term = new HeatTransportDiffusionNN(grid, eqsys, path, s->GetString(path+"/nn/model"));
+        oprtr->AddTerm(term);
+        eqsys->RegisterNNHeatTransport(term);
+        hasNonTrivialTransport = true;
+        auto *dbc = ConstructTransportBoundaryCondition<TransportDiffusiveBC>(bc, term, oprtr, path, grid, heat);
+        if (diffusive_bc != nullptr) *diffusive_bc = dbc;
+#else
+        throw SettingsException("NN transport requires rebuilding DREAM with -DDREAM_USE_ONNX_RUNTIME=ON.");
+#endif
+    }
+
+    // Prescribed heat diffusion scaled by sqrt(T_cold/T_ref)?
+    if (type == OptionConstants::EQTERM_TRANSPORT_PRESCRIBED_T_DEPENDENT) {
+        if (!heat || kinetic)
+            throw SettingsException(
+                "%s: Temperature-dependent prescribed diffusion can only be applied to fluid heat transport.",
+                path.c_str()
+            );
+        if (!hasCoeff("drr", 2))
+            throw SettingsException(
+                "%s: Temperature-dependent prescribed diffusion requires a prescribed 'drr' coefficient.",
+                path.c_str()
+            );
+        if (hasNonTrivialTransport)
+            DREAM::IO::PrintWarning(
+                DREAM::IO::WARNING_INCOMPATIBLE_TRANSPORT,
+                "Temperature-dependent prescribed diffusion applied alongside other transport model."
+            );
+
+        FVM::Interpolator1D *intp1 = LoadDataRT_intp(
+            path, grid->GetRadialGrid(), s, "drr",
+            true      // true: Drr is defined on r flux grid
+        );
+        real_t Tref = s->GetReal(path + "/drr_T_ref");
+
+        HeatTransportDiffusionTDependent *tt = new HeatTransportDiffusionTDependent(
+            grid, intp1, eqsys->GetUnknownHandler(), Tref
+        );
+        oprtr->AddTerm(tt);
+        hasNonTrivialTransport = true;
+
+        TransportDiffusiveBC *dbc =
+            ConstructTransportBoundaryCondition<TransportDiffusiveBC>(
+                bc, tt, oprtr, path, grid, heat
+            );
+
         if (diffusive_bc != nullptr)
             *diffusive_bc = dbc;
     }

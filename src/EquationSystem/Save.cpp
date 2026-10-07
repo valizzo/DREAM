@@ -6,6 +6,9 @@
 #include <softlib/SFile.h>
 #include "DREAM/EquationSystem.hpp"
 #include "DREAM/IO.hpp"
+#ifdef DREAM_HAS_ONNX_RUNTIME
+#include "DREAM/Equations/Fluid/HeatTransportDiffusionNN.hpp"
+#endif
 
 
 using namespace DREAM;
@@ -41,6 +44,10 @@ void EquationSystem::SaveTimings(SFile *sf, const string& name) {
  */
 void EquationSystem::SaveSolverData(SFile *sf, const string& name) {
 	this->solver->WriteDataSFile(sf, name);
+#ifdef DREAM_HAS_ONNX_RUNTIME
+	for (size_t index=0; index<nnHeatTransport.size(); ++index)
+		nnHeatTransport[index]->SaveDiagnostics(sf, name+"/nn_transport_"+std::to_string(index));
+#endif
 
 	// Save list of non-trivials
 	string unkn = "";

@@ -33,6 +33,7 @@ namespace DREAM { class EquationSystem; class Simulation; }
 
 
 namespace DREAM {
+    class HeatTransportDiffusionNN;
     class EquationSystem {
     public:
         typedef void (*timestep_finished_func_t)(Simulation*);
@@ -90,6 +91,7 @@ namespace DREAM {
 
         std::vector<timestep_finished_func_t> callbacks_timestepFinished;
         std::vector<void*> callbacks_timestepFinished_data;
+        std::vector<HeatTransportDiffusionNN*> nnHeatTransport;
 
     public:
         EqsysInitializer *initializer=nullptr;
@@ -137,6 +139,7 @@ namespace DREAM {
         std::vector<UnknownQuantityEquation*> *GetEquations() { return &unknown_equations; }
         Simulation *GetSimulation() { return this->simulation; }
         TimeStepper *GetTimeStepper() { return this->timestepper; }
+        void RegisterNNHeatTransport(HeatTransportDiffusionNN *term) { nnHeatTransport.push_back(term); }
 
         std::vector<real_t>& GetTimes() { return this->times; }
 

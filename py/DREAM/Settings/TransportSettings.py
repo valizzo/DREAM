@@ -15,6 +15,8 @@ TRANSPORT_SVENSSON = 4
 TRANSPORT_FROZEN_CURRENT = 5
 TRANSPORT_MHD_LIKE = 6
 TRANSPORT_MHD_LIKE_LOCAL = 7
+TRANSPORT_PRESCRIBED_T_DEPENDENT = 8
+TRANSPORT_NEURAL_NETWORK = 9
 
 INTERP3D_NEAREST     = 0
 INTERP3D_LINEAR      = 1
@@ -69,6 +71,8 @@ class TransportSettings:
         self.drr_ppar     = None
         self.drr_pperp    = None
         self.drr_interp3d = None
+        self.drr_T_ref    = 1000.0
+        self.nn = None
 
         # Svensson pstar
         self.pstar          = None
@@ -132,6 +136,46 @@ class TransportSettings:
         Set the diffusion coefficient to use.
         """
         self._prescribeCoefficient('drr', coeff=drr, t=t, r=r, p=p, xi=xi, ppar=ppar, pperp=pperp)
+
+
+    def prescribeTemperatureScaledDiffusion(self, drr, t=None, r=None, T_ref=1000.0):
+        """
+        Set a prescribed heat diffusion coefficient scaled by sqrt(T_cold/T_ref).
+
+        This transport mode is only supported for fluid heat transport.
+
+        :param drr:   Base heat diffusion coefficient D(t,r).
+        :param t:     Time grid on which the coefficient is defined.
+        :param r:     Radial grid on which the coefficient is defined.
+        :param T_ref: Reference temperature in eV.
+        """
+        self._prescribeCoefficient('drr', coeff=drr, t=t, r=r)
+        self.type = TRANSPORT_PRESCRIBED_T_DEPENDENT
+        self.drr_T_ref = float(scal(T_ref))
+
+
+    def setNeuralNetworkTransport(self, model=None, version=None, main_ion='D', T_ref=1000.0,
+                                 psi_scale=1.0, psi_offset=0.0, normalization_minor_radius=0.0):
+        """Configure native NN heat diffusion; zero until a real history is ready.
+
+        ``model`` overrides the DREAM-owned default; ``version`` selects a bundled
+        version. Flux convention is explicit; no IMAS transport table is needed.
+        """
+        from .NNTransportModel import resolve_model
+        if self.kinetic:
+            raise TransportException('NN transport is supported only for fluid heat transport')
+        if any(value is not None for value in (self.ar, self.drr, self.dBB)):
+            raise TransportException('NN transport cannot be combined with prescribed transport coefficients')
+        graph, contract = resolve_model(model, version)
+        self.nn = {
+            'model': str(graph), 'main_ion': str(main_ion),
+            'time_step': float(contract['time_step_seconds']),
+            'window_size': int(contract['window_size']), 'n_rho': len(contract['rho_grid']),
+            'T_ref': float(T_ref), 'psi_scale': float(psi_scale), 'psi_offset': float(psi_offset),
+            'normalization_minor_radius': float(normalization_minor_radius),
+        }
+        self.type = TRANSPORT_NEURAL_NETWORK
+        self.verifySettings()
 
 
     def setSvenssonPstar(self,pstar):
@@ -362,6 +406,7 @@ class TransportSettings:
         self.drr_ppar = None
         self.drr_pperp = None
         self.drr_interp3d =None
+        self.drr_T_ref = 1000.0
         
         # Svensson pstar
         self.pstar          = None
@@ -403,6 +448,7 @@ class TransportSettings:
 
         if 'type' in data:
             self.type = data['type']
+        self.nn = dict(data['nn']) if 'nn' in data else None
 
         if 'boundarycondition' in data:
             self.boundarycondition = data['boundarycondition']
@@ -434,6 +480,9 @@ class TransportSettings:
                 if 'xi' in data['drr']: self.drr_xi = data['drr']['xi']
                 if 'ppar' in data['drr']: self.drr_ppar = data['drr']['ppar']
                 if 'pperp' in data['drr']: self.drr_pperp = data['drr']['pperp']
+
+        if 'drr_T_ref' in data:
+            self.drr_T_ref = float(scal(data['drr_T_ref']))
 
         if 'pstar' in data:
             self.pstar = float(scal(data['pstar']))
@@ -495,6 +544,8 @@ class TransportSettings:
             'type': self.type,
             'boundarycondition': self.boundarycondition
         }
+        if self.type == TRANSPORT_NEURAL_NETWORK:
+            data['nn'] = dict(self.nn)
 
         # Advection?
         if self.type == TRANSPORT_PRESCRIBED and self.ar is not None:
@@ -514,13 +565,16 @@ class TransportSettings:
                     data['ar']['pperp'] = self.ar_pperp
 
         # Diffusion?
-        if self.type == TRANSPORT_PRESCRIBED and self.drr is not None:
+        if self.type in (TRANSPORT_PRESCRIBED, TRANSPORT_PRESCRIBED_T_DEPENDENT) and self.drr is not None:
             data['drr'] = {
                 'x': self.drr,
                 'r': self.drr_r,
                 't': self.drr_t,
                 'interp3d': self.drr_interp3d
             }
+
+            if self.type == TRANSPORT_PRESCRIBED_T_DEPENDENT:
+                data['drr_T_ref'] = self.drr_T_ref
 
             if self.kinetic:
                 if self.drr_p is not None:
@@ -627,6 +681,26 @@ class TransportSettings:
         elif self.type == TRANSPORT_MHD_LIKE:
             self.verifyBoundaryCondition()
         elif self.type == TRANSPORT_MHD_LIKE_LOCAL:
+            self.verifyBoundaryCondition()
+        elif self.type == TRANSPORT_NEURAL_NETWORK:
+            if self.kinetic or self.nn is None:
+                raise TransportException('NN transport requires fluid model settings')
+            if not self.nn['model'] or not self.nn['main_ion']:
+                raise TransportException('NN model and main ion must be specified')
+            numbers = [self.nn[name] for name in ('time_step', 'T_ref', 'psi_scale', 'psi_offset', 'normalization_minor_radius')]
+            if not np.all(np.isfinite(numbers)) or self.nn['time_step'] <= 0 or self.nn['T_ref'] <= 0 or self.nn['psi_scale'] == 0 or self.nn['normalization_minor_radius'] < 0:
+                raise TransportException('Invalid NN time, temperature, flux, or radius settings')
+            if self.nn['window_size'] < 2 or self.nn['n_rho'] < 3:
+                raise TransportException('NN model needs at least two temporal and three radial samples')
+            if any(value is not None for value in (self.ar, self.drr, self.dBB)):
+                raise TransportException('NN transport cannot be combined with prescribed transport coefficients')
+            self.verifyBoundaryCondition()
+        elif self.type == TRANSPORT_PRESCRIBED_T_DEPENDENT:
+            self.verifySettingsCoefficient('drr')
+            if self.drr is None:
+                raise TransportException("Temperature-dependent prescribed diffusion requires 'drr'.")
+            if self.drr_T_ref is None or self.drr_T_ref <= 0:
+                raise TransportException("Temperature-dependent prescribed diffusion requires drr_T_ref > 0.")
             self.verifyBoundaryCondition()
         else:
             raise TransportException("Unrecognized transport type: {}".format(self.type))

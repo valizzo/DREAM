@@ -1,0 +1,526 @@
+{
+  "deployment_schema_version": 1,
+  "source_bundle_manifest": {
+    "schema_version": 1,
+    "model_type": "CNN-RNN",
+    "architecture": {
+      "n_features": 14,
+      "n_rho_points": 128,
+      "cnn_out_channels": 32,
+      "rnn_hidden_size": 64
+    },
+    "feature_names": [
+      "n_imp_neutral_norm",
+      "Ne_ion_norm",
+      "te_rel_to_initial",
+      "psi_norm",
+      "abs_q",
+      "prox_q1",
+      "present_q2",
+      "grad_p",
+      "wth_norm",
+      "dwth_norm_dt_scaled",
+      "ip_norm",
+      "dip_norm_dt_scaled",
+      "li",
+      "j_tor_norm"
+    ],
+    "feature_indices": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "all_feature_names": [
+      "rho",
+      "n_imp_neutral_norm",
+      "Ne_ion_norm",
+      "te_rel_to_initial",
+      "psi_norm",
+      "abs_q",
+      "prox_q1",
+      "prox_q2",
+      "present_q2",
+      "grad_p",
+      "wth_norm",
+      "dwth_norm_dt_scaled",
+      "ip_norm",
+      "dip_norm_dt_scaled",
+      "li",
+      "j_tor_norm"
+    ],
+    "feature_definitions": {
+      "n_imp_neutral_norm": "Smoothed neutral.0 neon density / initial_ne_max; absent neon neutral is zero.",
+      "Ne_ion_norm": "Smoothed sum of ion densities with labels starting Ne / initial_ne_max (not charge weighted).",
+      "te_rel_to_initial": "Smoothed electron temperature / max(abs(smoothed initial electron temperature)).",
+      "psi_norm": "Smoothed poloidal flux / max(abs(smoothed initial poloidal flux)); preserve flux convention.",
+      "abs_q": "Absolute, unsmoothed safety factor.",
+      "prox_q1": "exp(-0.5*(distance in rho to nearest abs(q)=1 surface / 0.15)^2); zero if absent.",
+      "present_q2": "-1 inside nearest abs(q)=2 surface, +1 at/outside it, zero if absent.",
+      "grad_p": "Gradient of smoothed pressure w.r.t. rho / max(initial pressure); axis gradient zero; clip [-5,5].",
+      "wth_norm": "Thermal energy / initial thermal energy, broadcast across rho.",
+      "dwth_norm_dt_scaled": "Backward difference of wth_norm in seconds * thermal_quench_time * 100; first sample forward difference.",
+      "ip_norm": "Signed plasma current / initial plasma current, broadcast across rho.",
+      "dip_norm_dt_scaled": "Backward difference of ip_norm in seconds * thermal_quench_time * 100; first sample forward difference.",
+      "li": "2*q_safe(rho)^2/rho^4 * integral_0^rho(s^3/q_safe(s)^2 ds), trapezoidal; axis 0.5; abs(q)<=1e-6 replaced by +1e-6.",
+      "j_tor_norm": "Smoothed toroidal current density / signed largest-absolute value of smoothed initial profile."
+    },
+    "feature_units": "All engineered features are dimensionless.",
+    "window_size": 12,
+    "time_step_seconds": 5e-06,
+    "forecast_horizon_samples": 1,
+    "gru_history": "Reset hidden state for each complete sliding window.",
+    "input_layout": "batch,time,rho,feature",
+    "output_layout": "batch,rho",
+    "target": "core_profiles.profiles_1d.electrons.particles.d",
+    "target_units": "m^2/s",
+    "target_training_log10_bounds": [
+      -2.0,
+      5.0
+    ],
+    "imputer": {
+      "strategy": "median",
+      "missing_values": "NaN"
+    },
+    "preprocessing_order": [
+      "engineer native profiles",
+      "resample time",
+      "interpolate to model rho grid",
+      "select features",
+      "impute NaNs",
+      "standardize",
+      "infer",
+      "denormalize log10(D)",
+      "clip to training range",
+      "10**log10(D)"
+    ],
+    "profile_contract": {
+      "coordinate": "rho_pol_norm = sqrt(normalized poloidal flux), not DREAM radius in meters",
+      "radial_interpolation": "numpy.interp; linear with constant endpoint extension",
+      "edge": "Drop last native point from radial profiles when initial rho[-1] is 1 within 1e-8.",
+      "smoothing": "5-point boxcar with reflect padding; restore original first value; no smoothing for fewer than 5 points.",
+      "initial_ne_max": "Peak of unsmoothed FULL initial charge-weighted ion sum, including excluded edge.",
+      "electron_density": "Sum z_ion*n_ion; fallback charges parsed from D/T/H/Ne labels; nonfinite densities replaced by zero.",
+      "pressure": "(ne*Te + ion.0.density*ion.0.temperature)*1.602176634e-19, temperatures in eV; initial pressure uses smoothed initial densities/temperatures then is smoothed again.",
+      "thermal_energy": "summary.global_quantities.energy_thermal.value; fallback initial 1.5*integral(initial pressure d rho).",
+      "summary_interpolation": "Linear interpolation in seconds onto native profile times, constant endpoint extension.",
+      "thermal_quench_time": "1e-3*a/q95 seconds; q95 from initial abs(q) at rho=sqrt(0.95), default 4; a meters: D3D .67, SPARC .57, JET 1, ITER 2, KSTAR .5, unknown 1.",
+      "q_surfaces": "Find exact abs(q) integers within 1e-10 and linearly interpolate crossings in rho; nearest-surface flags include multiple crossings.",
+      "initial_baselines": "Recompute from EACH simulation's initial state; these are distinct from saved training-set standardization statistics.",
+      "temporal_resampling": "Offline PCHIP per finite feature column with constant endpoint extension; one finite value held constant; all missing stays NaN.",
+      "causality_warning": "Offline PCHIP and first-sample forward derivatives may use future data. Online causal sampling/startup must be resolved before DREAM deployment."
+    },
+    "provenance": {
+      "command": "../disruption_database_tools/analyzeDBfiles/DBanalysis.py --cnnrnn --num-train-files=21 --alpha-weight=0.6 --window-size=12 --time-step=0.005 --lambda-smooth=0.07",
+      "arguments": {
+        "directory": ".",
+        "rnn": false,
+        "cnnrnn": true,
+        "window_size": 12,
+        "time_step": 0.005,
+        "num_train_files": 21,
+        "rank_features": false,
+        "alpha_weight": 0.6,
+        "lambda_smooth": 0.07
+      },
+      "working_directory": "/mnt/c/Users/ValerieIzzo/OneDrive - Fiat Lux LLC/Documents/LinuxFiles/MiRACL/M3DandNIMROD",
+      "train_files": [
+        "/mnt/c/Users/ValerieIzzo/OneDrive - Fiat Lux LLC/Documents/LinuxFiles/MiRACL/M3DandNIMROD/M3DC1_D3D_SPI_Lyons_16plane155582.h5",
+        "/mnt/c/Users/ValerieIzzo/OneDrive - Fiat Lux LLC/Documents/LinuxFiles/MiRACL/M3DandNIMROD/M3DC1_D3D_SPI_Lyons_32plane156174.h5",
+        "/mnt/c/Users/ValerieIzzo/OneDrive - Fiat Lux LLC/Documents/LinuxFiles/MiRACL/M3DandNIMROD/M3DC1_JET_SPI_Lyons_D2NeFast76536.h5",
+        "/mnt/c/Users/ValerieIzzo/OneDrive - Fiat Lux LLC/Documents/LinuxFiles/MiRACL/M3DandNIMROD/M3DC1_JET_SPI_Lyons_D2NeSlow101576.h5",
+        "/mnt/c/Users/ValerieIzzo/OneDrive - Fiat Lux LLC/Documents/LinuxFiles/MiRACL/M3DandNIMROD/M3DC1_JET_SPI_Lyons_pureNeSlow76095.h5",
+        "/mnt/c/Users/ValerieIzzo/OneDrive - Fiat Lux LLC/Documents/LinuxFiles/MiRACL/M3DandNIMROD/M3DC1_KSTAR_SPI_Lyons_1Ne100c468271.h5",
+        "/mnt/c/Users/ValerieIzzo/OneDrive - Fiat Lux LLC/Documents/LinuxFiles/MiRACL/M3DandNIMROD/M3DC1_KSTAR_SPI_Lyons_1Ne150c304266.h5",
+        "/mnt/c/Users/ValerieIzzo/OneDrive - Fiat Lux LLC/Documents/LinuxFiles/MiRACL/M3DandNIMROD/M3DC1_KSTAR_SPI_Lyons_1Ne150cADAS1153057.h5",
+        "/mnt/c/Users/ValerieIzzo/OneDrive - Fiat Lux LLC/Documents/LinuxFiles/MiRACL/M3DandNIMROD/M3DC1_KSTAR_SPI_Lyons_1NeRot897778.h5",
+        "/mnt/c/Users/ValerieIzzo/OneDrive - Fiat Lux LLC/Documents/LinuxFiles/MiRACL/M3DandNIMROD/M3DC1_KSTAR_SPI_Lyons_2NeStagger259034.h5",
+        "/mnt/c/Users/ValerieIzzo/OneDrive - Fiat Lux LLC/Documents/LinuxFiles/MiRACL/M3DandNIMROD/M3DC1_KSTAR_SPI_Lyons_2NeSym170851.h5",
+        "/mnt/c/Users/ValerieIzzo/OneDrive - Fiat Lux LLC/Documents/LinuxFiles/MiRACL/M3DandNIMROD/NIMROD_D3D_MGI_Izzo_BothValves.h5",
+        "/mnt/c/Users/ValerieIzzo/OneDrive - Fiat Lux LLC/Documents/LinuxFiles/MiRACL/M3DandNIMROD/NIMROD_D3D_MGI_Izzo_BothValves_Rev-Ip.h5",
+        "/mnt/c/Users/ValerieIzzo/OneDrive - Fiat Lux LLC/Documents/LinuxFiles/MiRACL/M3DandNIMROD/NIMROD_D3D_MGI_Izzo_Cerberus.h5",
+        "/mnt/c/Users/ValerieIzzo/OneDrive - Fiat Lux LLC/Documents/LinuxFiles/MiRACL/M3DandNIMROD/NIMROD_D3D_SPI_Kim_CQL3D.h5",
+        "/mnt/c/Users/ValerieIzzo/OneDrive - Fiat Lux LLC/Documents/LinuxFiles/MiRACL/M3DandNIMROD/NIMROD_D3D_SPI_Kim_pD3S10.h5",
+        "/mnt/c/Users/ValerieIzzo/OneDrive - Fiat Lux LLC/Documents/LinuxFiles/MiRACL/M3DandNIMROD/NIMROD_SPARC_MGI_Izzo_4res11modes.h5",
+        "/mnt/c/Users/ValerieIzzo/OneDrive - Fiat Lux LLC/Documents/LinuxFiles/MiRACL/M3DandNIMROD/NIMROD_SPARC_MGI_Izzo_6non11modes.h5",
+        "/mnt/c/Users/ValerieIzzo/OneDrive - Fiat Lux LLC/Documents/LinuxFiles/MiRACL/M3DandNIMROD/NIMROD_SPARC_MGI_Izzo_6non22modes.h5",
+        "/mnt/c/Users/ValerieIzzo/OneDrive - Fiat Lux LLC/Documents/LinuxFiles/MiRACL/M3DandNIMROD/NIMROD_SPARC_MGI_Izzo_6res11modes.h5",
+        "/mnt/c/Users/ValerieIzzo/OneDrive - Fiat Lux LLC/Documents/LinuxFiles/MiRACL/M3DandNIMROD/NIMROD_SPARC_MGI_Izzo_6res22modes.h5"
+      ],
+      "validation_files": [
+        "/mnt/c/Users/ValerieIzzo/OneDrive - Fiat Lux LLC/Documents/LinuxFiles/MiRACL/M3DandNIMROD/testM3DC1_D3D_SPI_Lyons_8plane154127.h5",
+        "/mnt/c/Users/ValerieIzzo/OneDrive - Fiat Lux LLC/Documents/LinuxFiles/MiRACL/M3DandNIMROD/testM3DC1_JET_SPI_Lyons_pureNeFast94260.h5",
+        "/mnt/c/Users/ValerieIzzo/OneDrive - Fiat Lux LLC/Documents/LinuxFiles/MiRACL/M3DandNIMROD/testM3DC1_KSTAR_SPI_Lyons_1Ne50c717493.h5",
+        "/mnt/c/Users/ValerieIzzo/OneDrive - Fiat Lux LLC/Documents/LinuxFiles/MiRACL/M3DandNIMROD/testNIMROD_D3D_MGI_Izzo_Medusa.h5",
+        "/mnt/c/Users/ValerieIzzo/OneDrive - Fiat Lux LLC/Documents/LinuxFiles/MiRACL/M3DandNIMROD/testNIMROD_D3D_SPI_Kim_pD3S15.h5",
+        "/mnt/c/Users/ValerieIzzo/OneDrive - Fiat Lux LLC/Documents/LinuxFiles/MiRACL/M3DandNIMROD/testNIMROD_SPARC_MGI_Izzo_4non11modes.h5"
+      ],
+      "reference_simulation": "/mnt/c/Users/ValerieIzzo/OneDrive - Fiat Lux LLC/Documents/LinuxFiles/MiRACL/M3DandNIMROD/testM3DC1_D3D_SPI_Lyons_8plane154127.h5",
+      "reference_window_index": 0,
+      "epochs": 50,
+      "optimizer": "Adam",
+      "learning_rate": 0.001,
+      "loss": "MSE * (1 + alpha_weight * clamp(normalized_target, min=0)) plus lambda_smooth * mean(sum(adjacent normalized prediction differences squared))",
+      "analysis_source_sha256": "138381e722ab26405855a193287d37bbf8af2feaceb6bcf993d52320fbfbb5b2",
+      "sklearn_version": "1.7.2",
+      "scipy_version": "1.13.0"
+    },
+    "torch_version": "2.6.0+cu124",
+    "numpy_version": "1.26.4",
+    "source_sha256": {
+      "cnnrnn_model.py": "b46566097d8aa80d47c63264a6d70370af2d089ca9269761a9b3e2e7c7c16c9f"
+    },
+    "sha256": {
+      "weights.pt": "d7c1191bf8768bc63ff8a3503692ba0cba9c5a5737477d3cfc6ce46bcddf4d9c",
+      "preprocessing.npz": "feeac0135ad4c0945b9d326cb4743ed019561472461b4807f24d782465fe6bc5",
+      "reference.npz": "495935b7c4643b945aeabab9a5f6d2f94f360094a18f28fa4f24682ed65539af"
+    }
+  },
+  "input_name": "features",
+  "input_shape": [
+    1,
+    12,
+    128,
+    14
+  ],
+  "input_dtype": "float32",
+  "input_order": "C-contiguous batch,time,rho,feature",
+  "input_policy": "NaNs imputed; reject infinities in the calling application.",
+  "output_names": [
+    "log10_d",
+    "diffusion"
+  ],
+  "output_shape": [
+    1,
+    128
+  ],
+  "inference_clip_log10_bounds": [
+    -3.0,
+    3.0
+  ],
+  "feature_names": [
+    "n_imp_neutral_norm",
+    "Ne_ion_norm",
+    "te_rel_to_initial",
+    "psi_norm",
+    "abs_q",
+    "prox_q1",
+    "present_q2",
+    "grad_p",
+    "wth_norm",
+    "dwth_norm_dt_scaled",
+    "ip_norm",
+    "dip_norm_dt_scaled",
+    "li",
+    "j_tor_norm"
+  ],
+  "rho_grid": [
+    0.0,
+    0.007874015748031496,
+    0.015748031496062992,
+    0.023622047244094488,
+    0.031496062992125984,
+    0.03937007874015748,
+    0.047244094488188976,
+    0.05511811023622047,
+    0.06299212598425197,
+    0.07086614173228346,
+    0.07874015748031496,
+    0.08661417322834646,
+    0.09448818897637795,
+    0.10236220472440945,
+    0.11023622047244094,
+    0.11811023622047244,
+    0.12598425196850394,
+    0.13385826771653542,
+    0.14173228346456693,
+    0.14960629921259844,
+    0.15748031496062992,
+    0.1653543307086614,
+    0.1732283464566929,
+    0.18110236220472442,
+    0.1889763779527559,
+    0.19685039370078738,
+    0.2047244094488189,
+    0.2125984251968504,
+    0.2204724409448819,
+    0.22834645669291337,
+    0.23622047244094488,
+    0.2440944881889764,
+    0.25196850393700787,
+    0.25984251968503935,
+    0.26771653543307083,
+    0.2755905511811024,
+    0.28346456692913385,
+    0.29133858267716534,
+    0.2992125984251969,
+    0.30708661417322836,
+    0.31496062992125984,
+    0.3228346456692913,
+    0.3307086614173228,
+    0.33858267716535434,
+    0.3464566929133858,
+    0.3543307086614173,
+    0.36220472440944884,
+    0.3700787401574803,
+    0.3779527559055118,
+    0.3858267716535433,
+    0.39370078740157477,
+    0.4015748031496063,
+    0.4094488188976378,
+    0.41732283464566927,
+    0.4251968503937008,
+    0.4330708661417323,
+    0.4409448818897638,
+    0.44881889763779526,
+    0.45669291338582674,
+    0.4645669291338583,
+    0.47244094488188976,
+    0.48031496062992124,
+    0.4881889763779528,
+    0.49606299212598426,
+    0.5039370078740157,
+    0.5118110236220472,
+    0.5196850393700787,
+    0.5275590551181102,
+    0.5354330708661417,
+    0.5433070866141733,
+    0.5511811023622047,
+    0.5590551181102362,
+    0.5669291338582677,
+    0.5748031496062992,
+    0.5826771653543307,
+    0.5905511811023622,
+    0.5984251968503937,
+    0.6062992125984252,
+    0.6141732283464567,
+    0.6220472440944882,
+    0.6299212598425197,
+    0.6377952755905512,
+    0.6456692913385826,
+    0.6535433070866141,
+    0.6614173228346456,
+    0.6692913385826772,
+    0.6771653543307087,
+    0.6850393700787402,
+    0.6929133858267716,
+    0.7007874015748031,
+    0.7086614173228346,
+    0.7165354330708661,
+    0.7244094488188977,
+    0.7322834645669292,
+    0.7401574803149606,
+    0.7480314960629921,
+    0.7559055118110236,
+    0.7637795275590551,
+    0.7716535433070866,
+    0.7795275590551181,
+    0.7874015748031495,
+    0.7952755905511811,
+    0.8031496062992126,
+    0.8110236220472441,
+    0.8188976377952756,
+    0.8267716535433071,
+    0.8346456692913385,
+    0.84251968503937,
+    0.8503937007874016,
+    0.8582677165354331,
+    0.8661417322834646,
+    0.8740157480314961,
+    0.8818897637795275,
+    0.889763779527559,
+    0.8976377952755905,
+    0.905511811023622,
+    0.9133858267716535,
+    0.9212598425196851,
+    0.9291338582677166,
+    0.937007874015748,
+    0.9448818897637795,
+    0.952755905511811,
+    0.9606299212598425,
+    0.968503937007874,
+    0.9763779527559056,
+    0.984251968503937,
+    0.9921259842519685,
+    1.0
+  ],
+  "window_size": 12,
+  "time_step_seconds": 5e-06,
+  "forecast_horizon_samples": 1,
+  "warnings": [
+    "Source manifest target-training bounds differ from the saved inference clipping range; inference uses preprocessing.npz unchanged. Training bounds cannot be inferred from clipping extrema alone."
+  ],
+  "onnx_version": "1.18.0",
+  "onnxruntime_version": "1.22.1",
+  "torch_version": "2.6.0+cu124",
+  "opset": 17,
+  "exporter_sha256": "77a51d2371152ff2443d86f1a94a657deed4e5dfd73195ab1e411fc6dadcdc9b",
+  "source_bundle": "/mnt/c/Users/ValerieIzzo/OneDrive - Fiat Lux LLC/Documents/LinuxFiles/MiRACL/M3DandNIMROD/ML_analysis_20261006_091642/cnnrnn_bundle",
+  "tolerances": {
+    "log10_rtol": 1e-05,
+    "log10_atol": 1e-05,
+    "diffusion_rtol": 0.0001,
+    "diffusion_atol": 1e-07
+  },
+  "parity_results": [
+    {
+      "case": "saved_reference",
+      "max_log10_absolute_error": 9.5367431640625e-07,
+      "max_diffusion_relative_error": 2.1685202682419913e-06
+    },
+    {
+      "case": "synthetic_partial_missing",
+      "max_log10_absolute_error": 5.960464477539062e-07,
+      "max_diffusion_relative_error": 1.4266131529439008e-06
+    },
+    {
+      "case": "synthetic_all_missing",
+      "max_log10_absolute_error": 9.5367431640625e-07,
+      "max_diffusion_relative_error": 2.2230608465179102e-06
+    },
+    {
+      "case": "synthetic_standardized_normal",
+      "max_log10_absolute_error": 7.152557373046875e-07,
+      "max_diffusion_relative_error": 1.6395424609072506e-06
+    },
+    {
+      "case": "synthetic_large_normalized_inputs",
+      "max_log10_absolute_error": 9.5367431640625e-07,
+      "max_diffusion_relative_error": 2.198959919041954e-06
+    },
+    {
+      "case": "testM3DC1_D3D_SPI_Lyons_8plane154127.h5:window_0",
+      "max_log10_absolute_error": 9.5367431640625e-07,
+      "max_diffusion_relative_error": 2.1685202682419913e-06
+    },
+    {
+      "case": "testM3DC1_D3D_SPI_Lyons_8plane154127.h5:window_42",
+      "max_log10_absolute_error": 9.5367431640625e-07,
+      "max_diffusion_relative_error": 2.2161505057738395e-06
+    },
+    {
+      "case": "testM3DC1_D3D_SPI_Lyons_8plane154127.h5:window_85",
+      "max_log10_absolute_error": 3.5762786865234375e-07,
+      "max_diffusion_relative_error": 8.666071948937315e-07
+    },
+    {
+      "case": "testM3DC1_D3D_SPI_Lyons_8plane154127.h5:window_128",
+      "max_log10_absolute_error": 4.76837158203125e-07,
+      "max_diffusion_relative_error": 1.1570409697014838e-06
+    },
+    {
+      "case": "testM3DC1_JET_SPI_Lyons_pureNeFast94260.h5:window_0",
+      "max_log10_absolute_error": 9.5367431640625e-07,
+      "max_diffusion_relative_error": 2.183998049076763e-06
+    },
+    {
+      "case": "testM3DC1_JET_SPI_Lyons_pureNeFast94260.h5:window_209",
+      "max_log10_absolute_error": 7.152557373046875e-07,
+      "max_diffusion_relative_error": 1.6483721765325754e-06
+    },
+    {
+      "case": "testM3DC1_JET_SPI_Lyons_pureNeFast94260.h5:window_418",
+      "max_log10_absolute_error": 7.152557373046875e-07,
+      "max_diffusion_relative_error": 1.661436044742004e-06
+    },
+    {
+      "case": "testM3DC1_JET_SPI_Lyons_pureNeFast94260.h5:window_627",
+      "max_log10_absolute_error": 7.152557373046875e-07,
+      "max_diffusion_relative_error": 1.6657637615935528e-06
+    },
+    {
+      "case": "testM3DC1_KSTAR_SPI_Lyons_1Ne50c717493.h5:window_0",
+      "max_log10_absolute_error": 4.76837158203125e-07,
+      "max_diffusion_relative_error": 1.1317109738229192e-06
+    },
+    {
+      "case": "testM3DC1_KSTAR_SPI_Lyons_1Ne50c717493.h5:window_49",
+      "max_log10_absolute_error": 7.152557373046875e-07,
+      "max_diffusion_relative_error": 1.6250523913186044e-06
+    },
+    {
+      "case": "testM3DC1_KSTAR_SPI_Lyons_1Ne50c717493.h5:window_98",
+      "max_log10_absolute_error": 4.76837158203125e-07,
+      "max_diffusion_relative_error": 1.1693076658048085e-06
+    },
+    {
+      "case": "testM3DC1_KSTAR_SPI_Lyons_1Ne50c717493.h5:window_148",
+      "max_log10_absolute_error": 1.1920928955078125e-06,
+      "max_diffusion_relative_error": 2.7973519536317326e-06
+    },
+    {
+      "case": "testNIMROD_D3D_MGI_Izzo_Medusa.h5:window_0",
+      "max_log10_absolute_error": 1.430511474609375e-06,
+      "max_diffusion_relative_error": 3.3396502203686396e-06
+    },
+    {
+      "case": "testNIMROD_D3D_MGI_Izzo_Medusa.h5:window_235",
+      "max_log10_absolute_error": 7.152557373046875e-07,
+      "max_diffusion_relative_error": 1.6504571931363898e-06
+    },
+    {
+      "case": "testNIMROD_D3D_MGI_Izzo_Medusa.h5:window_471",
+      "max_log10_absolute_error": 9.5367431640625e-07,
+      "max_diffusion_relative_error": 2.2123481357994024e-06
+    },
+    {
+      "case": "testNIMROD_D3D_MGI_Izzo_Medusa.h5:window_707",
+      "max_log10_absolute_error": 1.1920928955078125e-06,
+      "max_diffusion_relative_error": 2.8216506962053245e-06
+    },
+    {
+      "case": "testNIMROD_D3D_SPI_Kim_pD3S15.h5:window_0",
+      "max_log10_absolute_error": 9.5367431640625e-07,
+      "max_diffusion_relative_error": 2.200798462581588e-06
+    },
+    {
+      "case": "testNIMROD_D3D_SPI_Kim_pD3S15.h5:window_92",
+      "max_log10_absolute_error": 7.152557373046875e-07,
+      "max_diffusion_relative_error": 1.7091589370465954e-06
+    },
+    {
+      "case": "testNIMROD_D3D_SPI_Kim_pD3S15.h5:window_184",
+      "max_log10_absolute_error": 4.172325134277344e-07,
+      "max_diffusion_relative_error": 9.176615662909171e-07
+    },
+    {
+      "case": "testNIMROD_D3D_SPI_Kim_pD3S15.h5:window_277",
+      "max_log10_absolute_error": 5.960464477539062e-07,
+      "max_diffusion_relative_error": 1.4093280924498686e-06
+    },
+    {
+      "case": "testNIMROD_SPARC_MGI_Izzo_4non11modes.h5:window_0",
+      "max_log10_absolute_error": 9.5367431640625e-07,
+      "max_diffusion_relative_error": 2.2350727704179008e-06
+    },
+    {
+      "case": "testNIMROD_SPARC_MGI_Izzo_4non11modes.h5:window_276",
+      "max_log10_absolute_error": 9.5367431640625e-07,
+      "max_diffusion_relative_error": 2.292594444952556e-06
+    },
+    {
+      "case": "testNIMROD_SPARC_MGI_Izzo_4non11modes.h5:window_552",
+      "max_log10_absolute_error": 7.152557373046875e-07,
+      "max_diffusion_relative_error": 1.6930060837694327e-06
+    },
+    {
+      "case": "testNIMROD_SPARC_MGI_Izzo_4non11modes.h5:window_828",
+      "max_log10_absolute_error": 7.152557373046875e-07,
+      "max_diffusion_relative_error": 1.6964978613032144e-06
+    }
+  ],
+  "sha256": {
+    "transport.onnx": "3790a4827ccf63f55ccafeeb30197a451b709c9b928307cb803a78fe141bad8c",
+    "parity_cases.h5": "b45e4f966105074db0e148754141c43d594b73b86152b198c5ad2cb01064e41f"
+  }
+}

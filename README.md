@@ -18,7 +18,13 @@ The official DREAM paper is
 [doi:10.1016/j.cpc.2021.108098](https://doi.org/10.1016/j.cpc.2021.108098)
 (it is also on arXiv: [2103.16457](https://arxiv.org/abs/2103.16457)).
 
+## MiRACL version
+
+Optional native NN electron heat transport, versioned bundled models, and a
+standalone example are described in [models/transport/README.md](models/transport/README.md).
+
 ## Requirements
+
 To compile DREAM, you need to have the following software installed:
 
 - [CMake](https://cmake.org/) >= 3.12

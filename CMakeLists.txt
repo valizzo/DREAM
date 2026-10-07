@@ -28,6 +28,8 @@ option(DREAM_BUILD_PYFACE "Build the DREAM Python interface" OFF)
 option(GIT_SUBMODULE "Check submodules during build" ON)
 #option(PETSC_WITH_MPI "If ON, indicates that PETSc was linked with MPI" ON)
 option(INTERPROC_OPTIM "Allow linker to perform interprocedural optimization" ON)
+option(DREAM_USE_ONNX_RUNTIME "Enable native NN heat transport" OFF)
+set(ONNX_RUNTIME_ROOT "" CACHE PATH "ONNX Runtime CPU installation with include/ and lib/")
 
 # Require position-indepdent code when building PyFace
 cmake_dependent_option(

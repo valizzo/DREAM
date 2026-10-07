@@ -243,10 +243,17 @@ void EquationSystem::SetSolver(Solver *solver) {
 /**
  * Solve this equation system.
  */
+#ifdef DREAM_HAS_ONNX_RUNTIME
+#include "DREAM/Equations/Fluid/HeatTransportDiffusionNN.hpp"
+#endif
+
 void EquationSystem::Solve() {
     this->currentTime = 0;
     this->times.push_back(this->currentTime);
     this->timestepper->SetSolver(solver);
+#ifdef DREAM_HAS_ONNX_RUNTIME
+    for (auto *term : nnHeatTransport) term->InitializeHistory();
+#endif
 
     this->PrintNonTrivialUnknowns();
 	this->PrintExternallyIteratedUnknowns();
@@ -274,6 +281,9 @@ void EquationSystem::Solve() {
             solver->Solve(tNext, dt);
 
             timestepper->ValidateStep();
+#ifdef DREAM_HAS_ONNX_RUNTIME
+            for (auto *term : nnHeatTransport) term->AcceptStep(tNext);
+#endif
 
             // Post-process solution (should be done before saving any
             // time step)
